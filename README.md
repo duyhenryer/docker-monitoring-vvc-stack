@@ -29,11 +29,13 @@ A comprehensive monitoring and logging stack built with Docker Compose featuring
 
 ## Architecture
 
-<picture>
-  <source srcset="assets/vm-vl-cluster-dark.png" media="(prefers-color-scheme: dark)">
-  <source srcset="assets/vm-vl-cluster-light.png" media="(prefers-color-scheme: light)">
-  <img src="assets/vm-vl-cluster-light.png" alt="VictoriaMetrics cluster deployment" width="500" src="assets/vm-vl-cluster-light.png" >
-</picture>
+<p align="center">
+    <picture>
+        <source srcset="assets/vm-vl-cluster-dark.png" media="(prefers-color-scheme: dark)">
+        <source srcset="assets/vm-vl-cluster-light.png" media="(prefers-color-scheme: light)">
+        <img src="assets/vm-vl-cluster-light.png" alt="VictoriaMetrics cluster deployment" width="500">
+    </picture>
+</p>
 
 
 ### VictoriaMetrics Cluster
