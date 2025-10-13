@@ -57,22 +57,6 @@ The VictoriaLogs cluster provides fast log aggregation and search capabilities:
 - **Vector**: High-performance log collector that gathers Docker container logs
 - **Log Generator**: Generates sample logs for testing and demonstration
 
-### SQL-to-LogsQL Integration
-
-The SQL-to-LogsQL service provides a familiar SQL interface for querying VictoriaLogs:
-
-```
-SQL Query (Browser) → sql-to-logsql:8080
-    ↓ (translate SQL → LogsQL)
-vmauth:8427 (Basic Auth: admin/changeme)
-    ↓ (route /select/logsql/*)
-vlselect-1:9471 ⚖️ vlselect-2:9471 (Load Balanced)
-    ↓ (query)
-vlstorage-1:9491 & vlstorage-2:9491
-```
-
-This allows users to query logs using standard SQL syntax instead of learning LogsQL.
-
 ## Setup
 
 ### Environment Variables
