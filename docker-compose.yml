@@ -129,34 +129,6 @@ services:
       <<: *default-labels
     logging: *default-logging
 
-  # victorialogs:
-  #   image: victoriametrics/victoria-logs:${VICTORIALOGS_VERSION:-v1.24.0-victorialogs}
-  #   container_name: victorialogs
-  #   restart: always
-  #   healthcheck:
-  #     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9428/health"]
-  #     interval: 1s
-  #     timeout: 1s
-  #     retries: 10
-  #   command:
-  #     - --httpListenAddr=0.0.0.0:9428
-  #     - --loggerLevel=INFO
-  #     - --storageDataPath=/victoria-logs-data
-  #     - -retentionPeriod=4w
-  #     - --memory.allowedPercent=90
-  #     - -insert.maxLineSizeBytes=1048576  # 1MB per log line
-  #   volumes:
-  #     - victorialogs-data:/victoria-logs-data
-  #   ports:
-  #     - 9428:9428
-  #   cpus: 0.5
-  #   mem_limit: 512m
-  #   networks:
-  #     - monitoring
-  #   labels:
-  #     <<: *default-labels
-  #   logging: *default-logging
-
   vlinsert:
     image: victoriametrics/victoria-logs:${VICTORIALOGS_VERSION:-latest}
     restart: always
