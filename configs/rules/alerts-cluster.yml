@@ -1,0 +1,93 @@
+groups:
+- name: victoriametrics-cluster
+  interval: 30s
+  rules:
+  - alert: VMStorageDown
+    annotations:
+      summary: "VictoriaMetrics storage instance is down"
+      description: "VMStorage instance {{ $labels.instance }} is down for more than 2 minutes.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: up{job="vmstorage"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      component: vmstorage
+
+  - alert: VMInsertDown
+    annotations:
+      summary: "VMInsert instance is down"
+      description: "VMInsert instance {{ $labels.instance }} is down for more than 2 minutes.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: up{job="vminsert"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      component: vminsert
+
+  - alert: VMSelectDown
+    annotations:
+      summary: "VMSelect instance is down"
+      description: "VMSelect instance {{ $labels.instance }} is down for more than 2 minutes.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: up{job="vmselect"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      component: vmselect
+
+  - alert: VMAuthDown
+    annotations:
+      summary: "VMAuth proxy is down"
+      description: "VMAuth instance {{ $labels.instance }} is down for more than 2 minutes.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: up{job="vmauth"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      component: vmauth
+
+  - alert: VMStorageHighMemoryUsage
+    annotations:
+      summary: "VMStorage high memory usage"
+      description: "VMStorage instance {{ $labels.instance }} is using more than 90% of available memory.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: vm_app_memory_usage_bytes{job="vmstorage"} / vm_app_memory_limit_bytes{job="vmstorage"} > 0.9
+    for: 5m
+    labels:
+      severity: warning
+      component: vmstorage
+
+  - alert: VMInsertHighMemoryUsage
+    annotations:
+      summary: "VMInsert high memory usage"
+      description: "VMInsert instance {{ $labels.instance }} is using more than 90% of available memory.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: vm_app_memory_usage_bytes{job="vminsert"} / vm_app_memory_limit_bytes{job="vminsert"} > 0.9
+    for: 5m
+    labels:
+      severity: warning
+      component: vminsert
+
+  - alert: VMSelectHighMemoryUsage
+    annotations:
+      summary: "VMSelect high memory usage"
+      description: "VMSelect instance {{ $labels.instance }} is using more than 90% of available memory.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: vm_app_memory_usage_bytes{job="vmselect"} / vm_app_memory_limit_bytes{job="vmselect"} > 0.9
+    for: 5m
+    labels:
+      severity: warning
+      component: vmselect
+
+  - alert: VMStorageDiskSpaceRunningLow
+    annotations:
+      summary: "VMStorage disk space is running low"
+      description: "VMStorage instance {{ $labels.instance }} has less than 15% free disk space.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: vm_free_disk_space_bytes{job="vmstorage"} / vm_data_size_bytes{job="vmstorage"} < 0.15
+    for: 10m
+    labels:
+      severity: warning
+      component: vmstorage
+
+  - alert: VMStorageDiskSpaceCritical
+    annotations:
+      summary: "VMStorage disk space is critically low"
+      description: "VMStorage instance {{ $labels.instance }} has less than 5% free disk space.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: vm_free_disk_space_bytes{job="vmstorage"} / vm_data_size_bytes{job="vmstorage"} < 0.05
+    for: 5m
+    labels:
+      severity: critical
+      component: vmstorage

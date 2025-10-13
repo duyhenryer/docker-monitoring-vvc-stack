@@ -1,0 +1,34 @@
+# balance load among vminsert, vmselect, vlinsert, vlselect instances
+# see https://docs.victoriametrics.com/victoriametrics/vmauth/#load-balancing.
+# 
+# IMPORTANT: Change username and password to match VMAUTH_USERNAME and VMAUTH_PASSWORD in .env file
+# Default: admin/changeme
+# Also update the Grafana datasource configuration if you change these credentials.
+users:
+  - username: "admin"
+    password: "changeme"
+    url_map:
+    # VictoriaMetrics Cluster
+    - src_paths:
+      - "/select/0/prometheus/.*"
+      - "/admin/.*"
+      url_prefix:
+      - http://vmselect-1:8481
+      - http://vmselect-2:8481
+    - src_paths:
+      - "/insert/0/prometheus/.*"
+      url_prefix:
+      - http://vminsert-1:8480
+      - http://vminsert-2:8480
+    # VictoriaLogs Cluster
+    - src_paths:
+      - "/select/logsql/.*"
+      - "/select/vmui/.*"
+      url_prefix:
+      - http://vlselect-1:9471
+      - http://vlselect-2:9471
+    - src_paths:
+      - "/insert/jsonline/.*"
+      - "/insert/elasticsearch/.*"
+      url_prefix:
+      - http://vlinsert:9481

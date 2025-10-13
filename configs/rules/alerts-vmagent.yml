@@ -1,0 +1,73 @@
+groups:
+- name: vmagent
+  interval: 30s
+  rules:
+  - alert: VMAgentDown
+    annotations:
+      summary: "VMAgent is down"
+      description: "VMAgent instance {{ $labels.instance }} is down for more than 2 minutes.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: up{job="vmagent"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      component: vmagent
+
+  - alert: VMAgentRemoteWriteErrors
+    annotations:
+      summary: "VMAgent has remote write errors"
+      description: "VMAgent instance {{ $labels.instance }} is experiencing remote write errors.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: rate(vmagent_remotewrite_errors_total[5m]) > 0
+    for: 5m
+    labels:
+      severity: warning
+      component: vmagent
+
+  - alert: VMAgentRemoteWriteConnectionLost
+    annotations:
+      summary: "VMAgent lost connection to remote storage"
+      description: "VMAgent instance {{ $labels.instance }} cannot connect to remote write endpoint.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: vmagent_remotewrite_conn_state{job="vmagent"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      component: vmagent
+
+  - alert: VMAgentHighMemoryUsage
+    annotations:
+      summary: "VMAgent high memory usage"
+      description: "VMAgent instance {{ $labels.instance }} is using more than 90% of available memory.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: vm_app_memory_usage_bytes{job="vmagent"} / vm_app_memory_limit_bytes{job="vmagent"} > 0.9
+    for: 5m
+    labels:
+      severity: warning
+      component: vmagent
+
+  - alert: VMAgentHighPendingSeries
+    annotations:
+      summary: "VMAgent has too many pending series"
+      description: "VMAgent instance {{ $labels.instance }} has more than 100k pending series. Remote write might be slow.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: vmagent_remotewrite_pending_data_bytes{job="vmagent"} > 100000000
+    for: 10m
+    labels:
+      severity: warning
+      component: vmagent
+
+  - alert: VMAgentTargetScrapeFailed
+    annotations:
+      summary: "VMAgent target scrape failed"
+      description: "VMAgent failed to scrape target {{ $labels.job }}/{{ $labels.instance }}.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: up{job!~"vmagent|vminsert|vmselect|vmstorage|vmauth|vmalert"} == 0
+    for: 5m
+    labels:
+      severity: warning
+      component: vmagent
+
+  - alert: VMAgentConfigReloadFailed
+    annotations:
+      summary: "VMAgent configuration reload failed"
+      description: "VMAgent instance {{ $labels.instance }} failed to reload configuration.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
+    expr: vmagent_config_last_reload_successful{job="vmagent"} == 0
+    for: 2m
+    labels:
+      severity: warning
+      component: vmagent

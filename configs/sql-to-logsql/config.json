@@ -1,0 +1,12 @@
+{
+  "listenAddr": ":8080",
+  "endpoint": "http://admin:changeme@vmauth:8427",
+  "bearerToken": "",
+  "tables": {
+    "logs": "*",
+    "errors": "* | level:error",
+    "warnings": "* | level:warning OR level:warn",
+    "container_logs": "* | container:*"
+  },
+  "viewsDir": "/data/views"
+}

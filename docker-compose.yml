@@ -1,0 +1,778 @@
+x-logging:
+  &default-logging
+  driver: "json-file"
+  options:
+    max-size: "1m"
+    max-file: "1"
+    tag: "{{.Name}}"
+
+x-common-labels: &default-labels
+  logging_jobname: "containerlogs"
+  stackname: "docker-monitoring-stack"
+
+services:
+  grafana:
+    image: grafana/grafana:${GRAFANA_VERSION:-latest}
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_USERS_DEFAULT_THEME=dark
+      - GF_LOG_MODE=console
+      - GF_LOG_LEVEL=critical
+      - GF_PANELS_ENABLE_ALPHA=true
+      - GF_FEATURE_TOGGLES_ENABLE=accessControlOnCall # lokiLogsDataplane (Logs Drilldown UI) # DISABLED - using VictoriaLogs
+      # - GF_INSTALL_PLUGINS=grafana-polystat-panel,victoriametrics-logs-datasource # Deprecated by 12.X version.
+      # GF_PLUGINS_PREINSTALL: install plugin after grafan started.
+      - GF_PLUGINS_PREINSTALL_SYNC=grafana-polystat-panel,victoriametrics-logs-datasource
+    volumes:
+      - ./configs/grafana/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/provisioning-dashboards.yaml:ro
+      - ./configs/grafana/provisioning/datasources.yml:/etc/grafana/provisioning/datasources/provisioning-datasources.yaml:ro
+      - ./dashboards/node-metrics.json:/var/lib/grafana/dashboards/node-metrics.json:ro
+      - ./dashboards/container-metrics.json:/var/lib/grafana/dashboards/container-metrics.json:ro
+      - ./dashboards/vmagent.json:/var/lib/grafana/dashboards/vmagent.json:ro
+      - ./dashboards/vmauth.json:/var/lib/grafana/dashboards/vmauth.json:ro
+      - ./dashboards/vmalert.json:/var/lib/grafana/dashboards/vmalert.json:ro
+      - ./dashboards/vm-cluster.json:/var/lib/grafana/dashboards/vm-cluster.json:ro
+      # for victorialogs cluster
+      - ./dashboards/victorialogs_rev6.json:/var/lib/grafana/dashboards/victorialogs_rev6.json:ro
+      - ./dashboards/victorialogs-cluster.json:/var/lib/grafana/dashboards/victorialogs-cluster.json:ro
+      - grafana-data:/var/lib/grafana
+    # depends_on:
+    #   - prometheus
+    ports:
+      - 3000:3000
+    cpus: 0.5
+    mem_limit: 512m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:${CADVISOR_VERSION:-latest}
+    container_name: cadvisor
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      #- /dev/disk:/dev/disk:ro
+    cpus: 0.5
+    mem_limit: 512m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  node-exporter:
+    image: prom/node-exporter:${NODE_EXPORTER_VERSION:-latest}
+    container_name: node-exporter
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs|run/user)($$|/)'
+      - '--collector.netclass.ignored-devices=^(veth.*|br.*|docker.*|lo)$$'
+      - '--collector.netdev.device-exclude=^(veth.*|br.*|docker.*|lo)$$'
+    cpus: 0.5
+    mem_limit: 512m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  alertmanager:
+    image: prom/alertmanager:${ALERTMANAGER_VERSION:-latest}
+    container_name: alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--log.level=error'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+    volumes:
+      - ./configs/alertmanager/alertmanager-fallback-config.yml:/etc/alertmanager/config.yml
+    ports:
+      - 9093:9093
+    cpus: 0.5
+    mem_limit: 512m
+    networks:
+      - monitoring
+    depends_on:
+      - uncomplicated-alert-receiver
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  uncomplicated-alert-receiver:
+    image: ghcr.io/jamesread/uncomplicated-alert-receiver:${UNCOMPLICATED_ALERT_RECEIVER_VERSION:-latest}
+    container_name: uncomplicated-alert-receiver
+    ports:
+      - 9094:8080
+    cpus: 0.5
+    mem_limit: 512m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  # victorialogs:
+  #   image: victoriametrics/victoria-logs:${VICTORIALOGS_VERSION:-v1.24.0-victorialogs}
+  #   container_name: victorialogs
+  #   restart: always
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9428/health"]
+  #     interval: 1s
+  #     timeout: 1s
+  #     retries: 10
+  #   command:
+  #     - --httpListenAddr=0.0.0.0:9428
+  #     - --loggerLevel=INFO
+  #     - --storageDataPath=/victoria-logs-data
+  #     - -retentionPeriod=4w
+  #     - --memory.allowedPercent=90
+  #     - -insert.maxLineSizeBytes=1048576  # 1MB per log line
+  #   volumes:
+  #     - victorialogs-data:/victoria-logs-data
+  #   ports:
+  #     - 9428:9428
+  #   cpus: 0.5
+  #   mem_limit: 512m
+  #   networks:
+  #     - monitoring
+  #   labels:
+  #     <<: *default-labels
+  #   logging: *default-logging
+
+  vlinsert:
+    image: victoriametrics/victoria-logs:${VICTORIALOGS_VERSION:-latest}
+    restart: always
+    container_name: vlinsert
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9481/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    command:
+      - "--storageNode=vlstorage-1:9491"
+      - "--storageNode=vlstorage-2:9491"
+      - "--httpListenAddr=:9481"
+      - "--loggerLevel=INFO"
+      - "--memory.allowedPercent=80"
+    depends_on:
+      - vlstorage-1
+      - vlstorage-2
+    cpus: 0.1
+    mem_limit: 128m
+    environment:
+      - GOMAXPROCS=1
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  vlselect-1:
+    image: victoriametrics/victoria-logs:${VICTORIALOGS_VERSION:-latest}
+    restart: always
+    container_name: vlselect-1
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9471/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    command:
+      - "--storageNode=vlstorage-1:9491"
+      - "--storageNode=vlstorage-2:9491"
+      - "--httpListenAddr=:9471"
+      - "--loggerLevel=INFO"
+      - "--memory.allowedPercent=80"
+    depends_on:
+      - vlstorage-1
+      - vlstorage-2
+    cpus: 0.1
+    mem_limit: 128m
+    environment:
+      - GOMAXPROCS=1
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  vlselect-2:
+    image: victoriametrics/victoria-logs:${VICTORIALOGS_VERSION:-latest}
+    restart: always
+    container_name: vlselect-2
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9471/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    command:
+      - "--storageNode=vlstorage-1:9491"
+      - "--storageNode=vlstorage-2:9491"
+      - "--httpListenAddr=:9471"
+      - "--loggerLevel=INFO"
+      - "--memory.allowedPercent=80"
+    depends_on:
+      - vlstorage-1
+      - vlstorage-2
+    cpus: 0.1
+    mem_limit: 128m
+    environment:
+      - GOMAXPROCS=1
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  vlstorage-1:
+    image: victoriametrics/victoria-logs:${VICTORIALOGS_VERSION:-latest}
+    restart: always
+    container_name: vlstorage-1
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9491/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    command:
+      - "--storageDataPath=/vlogs"
+      - "--httpListenAddr=:9491"
+      - "--loggerLevel=INFO"
+      - "--memory.allowedPercent=80"
+      - "--retentionPeriod=4w"
+    volumes:
+      - vldata-1:/vlogs
+    cpus: 0.1
+    mem_limit: 128m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  vlstorage-2:
+    image: victoriametrics/victoria-logs:${VICTORIALOGS_VERSION:-latest}
+    restart: always
+    container_name: vlstorage-2
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9491/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    command:
+      - "--storageDataPath=/vlogs"
+      - "--httpListenAddr=:9491"
+      - "--loggerLevel=INFO"
+      - "--memory.allowedPercent=80"
+      - "--retentionPeriod=4w"
+    volumes:
+      - vldata-2:/vlogs
+    cpus: 0.1
+    mem_limit: 128m
+    environment:
+      - GOMAXPROCS=1
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+
+  sql-to-logsql:
+    image: ghcr.io/victoriametrics/sql-to-logsql:${SQL_TO_LOGSQL_VERSION:-latest}
+    container_name: sql-to-logsql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    ports:
+      - 8080:8080
+    volumes:
+      - ./configs/sql-to-logsql/config.json:/config.json:ro
+      - sql-views:/data/views
+    command:
+      - "-config"
+      - "/config.json"
+    depends_on:
+      - vlselect-1
+      - vlselect-2
+    cpus: 0.2
+    mem_limit: 256m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  log-generator:
+    image: ghcr.io/duyhenryer/log-generator:latest
+    container_name: log-generator
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+      - LOG_RATE=10
+    cpus: 0.2
+    mem_limit: 256m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  vector:
+    image: timberio/vector:${VECTOR_VERSION:-0.50.0-distroless-libc}
+    container_name: vector
+    restart: unless-stopped
+    user: root
+    volumes:
+      - ./configs/vector/vector.yaml:/etc/vector/vector.yaml:ro
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+      - type: bind
+        source: /var/lib/docker
+        target: /var/lib/docker
+    command: --config-yaml /etc/vector/vector.yaml
+    depends_on:
+      - vlinsert
+      - vmauth
+    cpus: 0.2
+    mem_limit: 128m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  vmstorage-1:
+    image: victoriametrics/vmstorage:${VMSTORAGE_VERSION:-v1.127.0-cluster}
+    restart: always
+    container_name: vmstorage-1
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8482/health"]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+    command:
+      - "-blockcache.missesBeforeCaching=2"
+      - "-cacheExpireDuration=30m"
+      - "-dedup.minScrapeInterval=15s"
+      - "-denyQueriesOutsideRetention"
+      - "-finalMergeDelay=0s"
+      - "-vminsertAddr=:8400"
+      - "-vmselectAddr=:8401"
+      - "-httpListenAddr=:8482"
+      - "-insert.maxQueueDuration=1m"
+      - "-loggerDisableTimestamps"
+      - "-loggerFormat=json"
+      - "-loggerLevel=INFO"
+      - "-loggerOutput=stdout"
+      - "-maxConcurrentInserts=16"
+      - "-memory.allowedPercent=90"
+      - "-retentionPeriod=15d"
+      - "-search.maxConcurrentRequests=32"
+      - "-search.maxUniqueTimeseries=1000000"
+      - "-snapshotsMaxAge=1d"
+      - "-storage.cacheSizeIndexDBDataBlocks=0"
+      - "-storage.cacheSizeIndexDBIndexBlocks=0"
+      - "-storage.cacheSizeIndexDBTagFilters=0"
+      - "-storage.cacheSizeStorageTSID=0"
+      - "-storage.maxDailySeries=100000000"
+      - "-storage.maxHourlySeries=50000000"
+      - "-storage.minFreeDiskSpaceBytes=1GB"
+      - "-storageDataPath=/data/vm-storage-1/"
+    cpus: 0.2
+    mem_limit: 512m
+    volumes:
+      - strgdata-1:/vm-storage-1
+    environment:
+      GOMAXPROCS: 1
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  vmstorage-2:
+    image: victoriametrics/vmstorage:${VMSTORAGE_VERSION:-v1.127.0-cluster}
+    restart: always
+    container_name: vmstorage-2
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8482/health"]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+    command:
+      - "-blockcache.missesBeforeCaching=2"
+      - "-cacheExpireDuration=30m"
+      - "-dedup.minScrapeInterval=15s"
+      - "-denyQueriesOutsideRetention"
+      - "-finalMergeDelay=0s"
+      - "-vminsertAddr=:8400"
+      - "-vmselectAddr=:8401"
+      - "-httpListenAddr=:8482"
+      - "-insert.maxQueueDuration=1m"
+      - "-loggerDisableTimestamps"
+      - "-loggerFormat=json"
+      - "-loggerLevel=INFO"
+      - "-loggerOutput=stdout"
+      - "-maxConcurrentInserts=16"
+      - "-memory.allowedPercent=90"
+      - "-retentionPeriod=15d"
+      - "-search.maxConcurrentRequests=32"
+      - "-search.maxUniqueTimeseries=1000000"
+      - "-snapshotsMaxAge=1d"
+      - "-storage.cacheSizeIndexDBDataBlocks=0"
+      - "-storage.cacheSizeIndexDBIndexBlocks=0"
+      - "-storage.cacheSizeIndexDBTagFilters=0"
+      - "-storage.cacheSizeStorageTSID=0"
+      - "-storage.maxDailySeries=100000000"
+      - "-storage.maxHourlySeries=50000000"
+      - "-storage.minFreeDiskSpaceBytes=1GB"
+      - "-storageDataPath=/data/vm-storage-2/"
+    environment:
+      GOMAXPROCS: 1
+    cpus: 0.2
+    mem_limit: 512m
+    volumes:
+      - strgdata-2:/vm-storage-2
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  vminsert-1:
+    image: victoriametrics/vminsert:${VMINSERT_VERSION:-v1.127.0-cluster}
+    container_name: vminsert-1
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8480/health"]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+    depends_on:
+      - "vmstorage-1"
+      - "vmstorage-2"
+    command:
+      # - "-clusternativeListenAddr=:7480"
+      - "-httpListenAddr=:8480"
+      - "-insert.maxQueueDuration=1m"
+      - "-loggerDisableTimestamps"
+      - "-loggerFormat=json"
+      - "-loggerLevel=INFO"
+      - "-loggerOutput=stdout"
+      - "-maxConcurrentInserts=8"
+      - "-maxInsertRequestSize=32MB"
+      - "-maxLabelValueLen=4096"
+      - "-maxLabelsPerTimeseries=50"
+      - "-memory.allowedPercent=90"
+      - "-storageNode=vmstorage-1:8400,vmstorage-2:8400"
+    environment:
+      GOMAXPROCS: 1
+    restart: always
+    cpus: 0.2
+    mem_limit: 256m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  vminsert-2:
+    image: victoriametrics/vminsert:${VMINSERT_VERSION:-v1.127.0-cluster}
+    container_name: vminsert-2
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8480/health"]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+    depends_on:
+      - "vmstorage-1"
+      - "vmstorage-2"
+    command:
+      - "-httpListenAddr=:8480"
+      - "-insert.maxQueueDuration=1m"
+      - "-loggerDisableTimestamps"
+      - "-loggerFormat=json"
+      - "-loggerLevel=INFO"
+      - "-loggerOutput=stdout"
+      - "-maxConcurrentInserts=8"
+      - "-maxInsertRequestSize=32MB"
+      - "-maxLabelValueLen=4096"
+      - "-maxLabelsPerTimeseries=50"
+      - "-memory.allowedPercent=90"
+      - "-storageNode=vmstorage-1:8400,vmstorage-2:8400"
+    environment:
+      GOMAXPROCS: 1
+    restart: always
+    cpus: 0.2
+    mem_limit: 256m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  vmselect-1:
+    image: victoriametrics/vmselect:${VMSELECT_VERSION:-v1.127.0-cluster}
+    container_name: vmselect-1
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8481/health"]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+    depends_on:
+      - "vmstorage-1"
+      - "vmstorage-2"
+    command:
+      - "--vmalert.proxyURL=http://vmalert:8880"
+      - "-clusternative.maxConcurrentRequests=16"
+      - "-clusternativeListenAddr=:7401"
+      - "-dedup.minScrapeInterval=15s"
+      - "-httpListenAddr=:8481"
+      - "-loggerDisableTimestamps"
+      - "-loggerFormat=json"
+      - "-loggerLevel=INFO"
+      - "-loggerOutput=stdout"
+      - "-memory.allowedPercent=90"
+      - "-search.denyPartialResponse"
+      - "-search.logQueryMemoryUsage=0"
+      - "-search.logSlowQueryDuration=5s"
+      - "-search.maxConcurrentRequests=16"
+      - "-search.maxMemoryPerQuery=0"
+      - "-search.maxPointsPerTimeseries=86400"
+      - "-search.maxQueryDuration=60s"
+      - "-search.maxSeries=1000000"
+      - "-search.maxUniqueTimeseries=1000000"
+      - "-storageNode=vmstorage-1:8401,vmstorage-2:8401"
+    environment:
+      GOMAXPROCS: 1
+    restart: always
+    cpus: 0.2
+    mem_limit: 256m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+  
+  vmselect-2:
+    image: victoriametrics/vmselect:${VMSELECT_VERSION:-v1.127.0-cluster}
+    container_name: vmselect-2
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8481/health"]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+    depends_on:
+      - "vmstorage-1"
+      - "vmstorage-2"
+    command:
+      - "--vmalert.proxyURL=http://vmalert:8880"
+      - "-clusternative.maxConcurrentRequests=16"
+      # - "-clusternativeListenAddr=:7481"
+      - "-dedup.minScrapeInterval=15s"
+      - "-httpListenAddr=:8481"
+      - "-loggerDisableTimestamps"
+      - "-loggerFormat=json"
+      - "-loggerLevel=INFO"
+      - "-loggerOutput=stdout"
+      - "-memory.allowedPercent=90"
+      - "-replicationFactor=2"
+      - "-search.denyPartialResponse"
+      - "-search.logQueryMemoryUsage=0"
+      - "-search.logSlowQueryDuration=5s"
+      - "-search.maxConcurrentRequests=16"
+      - "-search.maxMemoryPerQuery=0"
+      - "-search.maxPointsPerTimeseries=86400"
+      - "-search.maxQueryDuration=60s"
+      - "-search.maxSeries=1000000"
+      - "-search.maxUniqueTimeseries=1000000"
+      - "-storageNode=vmstorage-1:8401,vmstorage-2:8401"
+    environment:
+      GOMAXPROCS: 1
+    restart: always
+    cpus: 0.2
+    mem_limit: 256m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  #  Metrics collector.
+  #  It scrapes targets defined in --promscrape.config
+  #  And forward them to --remoteWrite.url
+  vmagent:
+    image: victoriametrics/vmagent:${VMAGENT_VERSION:-v1.127.0}
+    container_name: vmagent
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8429/health"]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+    depends_on:
+      - "vmauth"
+    ports:
+      - 8429:8429
+    volumes:
+      - vmagentdata:/vmagentdata
+      - ./configs/vm/prometheus-vm-cluster.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "--promscrape.config=/etc/prometheus/prometheus.yml"
+      - "--remoteWrite.url=http://vmauth:8427/insert/0/prometheus/api/v1/write"
+      - "--remoteWrite.basicAuth.username=${VMAUTH_USERNAME:-admin}"
+      - "--remoteWrite.basicAuth.password=${VMAUTH_PASSWORD:-changeme}"
+      - "-remoteWrite.showURL"
+      - "-httpListenAddr=:8429"
+      - "-loggerDisableTimestamps"
+      - "-loggerFormat=json"
+      - "-loggerLevel=INFO"
+      - "-loggerOutput=stdout"
+      - "-maxConcurrentInserts=8"
+      - "-maxInsertRequestSize=32MB"
+      - "-memory.allowedPercent=90"
+      - "-promscrape.maxScrapeSize=16MB"
+      - "-promscrape.seriesLimitPerTarget=50000"
+      - "-remoteWrite.flushInterval=15s"
+      - "-remoteWrite.label=''"
+    environment:
+      GOMAXPROCS: 1
+    restart: always
+    cpus: 0.2
+    mem_limit: 256m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  # vmauth is a router and balancer for HTTP requests.
+  # It is configured via --auth.config and balances
+  # read requests from Grafana, vmui, vmalert among vmselects.
+  # It can be used as an authentication proxy.
+  vmauth:
+    image: victoriametrics/vmauth:${VMAUTH_VERSION:-latest}
+    container_name: vmauth
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8427/health"]
+      interval: 1s
+      timeout: 1s
+      retries: 10
+    command:
+      - "--auth.config=/etc/auth.yml"
+      - "--httpListenAddr=:8427"
+      - "--loggerFormat=json"
+      - "--loggerLevel=INFO"
+      - "--loggerOutput=stdout"
+      - "--memory.allowedPercent=80"
+    depends_on:
+      - "vmselect-1"
+      - "vmselect-2"
+      - "vlselect-1"
+      - "vlselect-2"
+      - "vlinsert"
+    volumes:
+      - ./configs/vm/auth-vm-cluster.yml:/etc/auth.yml
+    ports:
+      - 8427:8427
+    environment:
+      GOMAXPROCS: 1
+    cpus: 0.1
+    mem_limit: 128m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+  # vmalert executes alerting and recording rules
+  # It reads rules, queries VM cluster via vmauth, and sends alerts to Alertmanager
+  vmalert:
+    image: victoriametrics/vmalert:${VMALERT_VERSION:-latest}
+    container_name: vmalert
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8880/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    depends_on:
+      - vmauth
+      - alertmanager
+    ports:
+      - 8880:8880
+    volumes:
+      - ./configs/rules/alerts-cluster.yml:/etc/alerts/alerts-cluster.yml:ro
+      - ./configs/rules/alerts-container-health.yml:/etc/alerts/alerts-container-health.yml:ro
+      - ./configs/rules/alerts-health.yml:/etc/alerts/alerts-health.yml:ro
+      - ./configs/rules/alerts-vmagent.yml:/etc/alerts/alerts-vmagent.yml:ro
+      - ./configs/rules/alerts-vmalert.yml:/etc/alerts/alerts-vmalert.yml:ro
+      - ./configs/rules/alerts-vmauth.yml:/etc/alerts/alerts-vmauth.yml:ro
+      - ./configs/rules/alerts-vlogs.yml:/etc/alerts/alerts-vlogs.yml:ro
+      - ./configs/rules/vlogs-example-alerts.yml:/etc/alerts/vlogs-example-alerts.yml:ro
+    command:
+      - "--datasource.url=http://vmauth:8427/select/0/prometheus"
+      - "--datasource.basicAuth.username=${VMAUTH_USERNAME:-admin}"
+      - "--datasource.basicAuth.password=${VMAUTH_PASSWORD:-changeme}"
+      # alerts state is restored from VictoriaMetrics on restarts
+      - "--remoteRead.url=http://vmauth:8427/select/0/prometheus" 
+      - "--remoteRead.basicAuth.username=${VMAUTH_USERNAME:-admin}"
+      - "--remoteRead.basicAuth.password=${VMAUTH_PASSWORD:-changeme}"
+      - "--remoteWrite.url=http://vmauth:8427/insert/0/prometheus"
+      - "--remoteWrite.basicAuth.username=${VMAUTH_USERNAME:-admin}"
+      - "--remoteWrite.basicAuth.password=${VMAUTH_PASSWORD:-changeme}"
+      - "--notifier.url=http://alertmanager:9093/"
+      - "--rule=/etc/alerts/*.yml"
+      - "--httpListenAddr=:8880"
+      - "--evaluationInterval=15s"
+      - "--loggerFormat=json"
+      - "--loggerLevel=INFO"
+      - "--memory.allowedPercent=80"
+      # Display source of alerts in Grafana - auto-open Explore view with correct datasource
+      - "--external.url=http://127.0.0.1:3000"
+      - '--external.alert.source=explore?orgId=1&left={"datasource":"VictoriaMetrics - Cluster","queries":[{"expr":{{.Expr|jsonEscape|queryEscape}},"refId":"A"}],"range":{"from":"{{ .ActiveAt.UnixMilli }}","to":"now"}}'
+    environment:
+      GOMAXPROCS: 1
+    cpus: 0.2
+    mem_limit: 256m
+    networks:
+      - monitoring
+    labels:
+      <<: *default-labels
+    logging: *default-logging
+
+volumes:
+  grafana-data: {}
+  # prometheus-data: {}  # DISABLED - using VictoriaMetrics
+  victorialogs-data: {}
+  vmagentdata: {}
+  strgdata-1: {}
+  strgdata-2: {}
+  sql-views: {}
+  vldata-1: {}
+  vldata-2: {}
+
+networks:
+  monitoring:
+    name: monitoring

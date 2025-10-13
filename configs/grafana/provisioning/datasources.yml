@@ -1,0 +1,87 @@
+apiVersion: 1
+
+datasources:
+  # ============================================
+  # PROMETHEUS (DISABLED - Using VictoriaMetrics)
+  # ============================================
+  # - name: Prometheus
+  #   type: prometheus
+  #   access: proxy
+  #   orgId: 1
+  #   url: http://prometheus:9090
+  #   version: 1
+  #   editable: true
+  #   isDefault: false
+
+  # ============================================
+  # LOKI (DISABLED - Using VictoriaLogs)
+  # ============================================
+  # - name: Loki
+  #   type: loki
+  #   access: proxy
+  #   url: http://loki:3100
+  #   version: 1
+  #   editable: false
+  #   isDefault: false
+
+  # ============================================
+  # ALERTMANAGER
+  # ============================================
+  - name: Alertmanager
+    type: alertmanager
+    url: http://alertmanager:9093
+    access: proxy
+    jsonData:
+      implementation: 'prometheus' 
+    basicAuth: false
+    #basicAuthUser: my_user
+    #basicAuthPassword: test_password
+  
+
+  
+  # ============================================
+  # VictoriaLogs Cluster (via vmauth load balancer)
+  # ============================================
+  - name: VictoriaLogs
+    type: victoriametrics-logs-datasource
+    access: proxy
+    url: http://vmauth:8427
+    version: 1
+    editable: true
+    isDefault: false
+    # Basic Auth for vmauth
+    basicAuth: true
+    basicAuthUser: admin
+    secureJsonData:
+      basicAuthPassword: changeme
+    jsonData:
+      # Increase timeout for large log queries
+      queryTimeout: 120s
+
+  - name: VictoriaMetrics - Cluster
+    type: prometheus
+    access: proxy
+    url: http://vmauth:8427/select/0/prometheus
+    isDefault: true
+    # Basic Auth credentials for the datasource
+    # This is used to authenticate with the vmauth service
+    # IMPORTANT: These credentials must match VMAUTH_USERNAME/VMAUTH_PASSWORD in .env file
+    # and also match the credentials in vmauth config `auth-vm-cluster.yml`
+    # Default: admin/changeme
+    basicAuth: true
+    basicAuthUser: admin
+    secureJsonData:
+      basicAuthPassword: changeme
+    jsonData:
+      prometheusType: Prometheus
+      prometheusVersion: 2.24.0
+      # Enable alert management - vmalert rules will be proxied via vmselect
+      # This works because vmselect has --vmalert.proxyURL configured
+      manageAlerts: true
+      alertmanagerUid: alertmanager
+      httpMethod: GET
+      # Increase timeout for large queries (default: 30s)
+      timeInterval: 15s
+      queryTimeout: 120s
+      # Enable query caching
+      cacheLevel: High
