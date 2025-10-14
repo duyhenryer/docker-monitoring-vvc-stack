@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily" # Can be "daily", "weekly", "monthly"
+    allow:
+      - dependency-type: "direct"
+    target-branch: "main"
+    commit-message:
+      prefix: "docker"
+      include: "scope"
