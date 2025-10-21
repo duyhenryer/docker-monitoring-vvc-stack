@@ -38,6 +38,8 @@ services:
       # for victorialogs cluster
       - ./dashboards/victorialogs_rev6.json:/var/lib/grafana/dashboards/victorialogs_rev6.json:ro
       - ./dashboards/victorialogs-cluster.json:/var/lib/grafana/dashboards/victorialogs-cluster.json:ro
+      # vector dashboard
+      - ./dashboards/vector_21954.json:/var/lib/grafana/dashboards/vector_21954.json:ro
       - grafana-data:/var/lib/grafana
     # depends_on:
     #   - prometheus
