@@ -26,7 +26,7 @@ groups:
     annotations:
       summary: "VMAgent lost connection to remote storage"
       description: "VMAgent instance {{ $labels.instance }} cannot connect to remote write endpoint.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
-    expr: vmagent_remotewrite_conn_state{job="vmagent"} == 0
+    expr: vmagent_remotewrite_errors_total{job="vmagent"} > 0
     for: 2m
     labels:
       severity: critical
@@ -36,7 +36,7 @@ groups:
     annotations:
       summary: "VMAgent high memory usage"
       description: "VMAgent instance {{ $labels.instance }} is using more than 90% of available memory.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
-    expr: vm_app_memory_usage_bytes{job="vmagent"} / vm_app_memory_limit_bytes{job="vmagent"} > 0.9
+    expr: go_memstats_alloc_bytes{job="vmagent"} > 200000000
     for: 5m
     labels:
       severity: warning
@@ -66,7 +66,7 @@ groups:
     annotations:
       summary: "VMAgent configuration reload failed"
       description: "VMAgent instance {{ $labels.instance }} failed to reload configuration.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
-    expr: vmagent_config_last_reload_successful{job="vmagent"} == 0
+    expr: vm_promscrape_config_last_reload_successful{job="vmagent"} == 0
     for: 2m
     labels:
       severity: warning
