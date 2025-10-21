@@ -46,7 +46,7 @@ groups:
     annotations:
       summary: "VMAlert datasource is unavailable"
       description: "VMAlert instance {{ $labels.instance }} cannot reach datasource {{ $labels.addr }}.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
-    expr: vmalert_datasource_requests_errors_total > 0
+    expr: vmalert_datasource_dial_errors_total > 0
     for: 5m
     labels:
       severity: critical
@@ -56,7 +56,7 @@ groups:
     annotations:
       summary: "VMAlert high memory usage"
       description: "VMAlert instance {{ $labels.instance }} is using more than 90% of available memory.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
-    expr: vm_app_memory_usage_bytes{job="vmalert"} / vm_app_memory_limit_bytes{job="vmalert"} > 0.9
+    expr: go_memstats_alloc_bytes{job="vmalert"} > 100000000
     for: 5m
     labels:
       severity: warning
