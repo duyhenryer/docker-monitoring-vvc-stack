@@ -10,9 +10,26 @@ sources:
     type: internal_metrics
 
 transforms:
-  msg_parser:
+  # Parse Docker labels and add Kubernetes-like labels
+  docker_labels:
     type: remap
     inputs: [docker]
+    source: |
+      # Extract Docker Compose labels
+      .container_name = .container.name
+      .namespace = .label.stackname
+      .app = .label."com.docker.compose.service"
+      .pod_name = .container.name
+      
+      # Add host info
+      .host = "docker-host"
+      
+      # Parse timestamp if available
+      .timestamp = parse_timestamp(.timestamp, format: "%+") ?? now()
+
+  msg_parser:
+    type: remap
+    inputs: [docker_labels]  # Changed from [docker]
     source: |
       .message = parse_json(.message) ?? .message
 
@@ -29,7 +46,8 @@ sinks:
       enabled: false
     request:
       headers:
-        VL-Stream-Fields: source_type,label.com.docker.compose.service
+        # VL-Stream-Fields: container_name,namespace,app,host,pod_name
+        VL-Stream-Fields: container_name,namespace,app,host,pod_name,logging_jobname,stackname
         VL-Time-Field: timestamp
         VL-Msg-Field: message,log
         AccountID: "0"
