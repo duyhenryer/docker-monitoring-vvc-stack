@@ -1,8 +1,33 @@
-# File contains default list of alerts for VictoriaLogs single server.
-# The alerts below are just recommendations and may require some updates
-# and threshold calibration according to every specific setup.
 groups:
-  - name: vlogs
+  - name: log-rules
+    type: vlogs
+    interval: 1m
+    rules:
+      # Recording rule: Count logs by path (for debugging and reuse)
+      # This creates a metric that can be queried in Grafana
+      - record: logCount
+        expr: '_time: 1m | stats by (path) count () as total'
+        labels:
+          metric_type: log_count
+        annotations:
+          description: "path {{$labels.path}} generated {{$value}} logs in the last 1 minute"
+      
+      # Alert: Too many logs from a single path
+      # Test query: _time: 1m | stats by (path) count () as total | filter total:>50
+      # Expected: Should only return paths with >50 logs in last 1 minute
+      - alert: tooManyLogs
+        expr: '_time: 1m | stats by (path) count () as total | filter total:>50'
+        # Add 'for' clause to prevent alert from firing immediately
+        # Alert will only fire if condition is true for at least 2 minutes
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Too many logs from path {{$labels.path}}"
+          description: "Path {{$labels.path}} generated {{$value}} log entries in the last 1 minute (threshold: 50). This may indicate log spam or an issue."
+
+  - name: vlogs-metrics
+    interval: 30s
     rules:
       - alert: DiskRunsOutOfSpace
         expr: |

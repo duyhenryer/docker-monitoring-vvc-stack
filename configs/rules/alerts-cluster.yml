@@ -46,7 +46,7 @@ groups:
     annotations:
       summary: "VMStorage high memory usage"
       description: "VMStorage instance {{ $labels.instance }} is using more than 90% of available memory.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
-    expr: vm_app_memory_usage_bytes{job="vmstorage"} / vm_app_memory_limit_bytes{job="vmstorage"} > 0.9
+    expr: go_memstats_alloc_bytes{job="vmstorage"} > 500000000
     for: 5m
     labels:
       severity: warning
@@ -56,7 +56,7 @@ groups:
     annotations:
       summary: "VMInsert high memory usage"
       description: "VMInsert instance {{ $labels.instance }} is using more than 90% of available memory.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
-    expr: vm_app_memory_usage_bytes{job="vminsert"} / vm_app_memory_limit_bytes{job="vminsert"} > 0.9
+    expr: go_memstats_alloc_bytes{job="vminsert"} > 200000000
     for: 5m
     labels:
       severity: warning
@@ -66,7 +66,7 @@ groups:
     annotations:
       summary: "VMSelect high memory usage"
       description: "VMSelect instance {{ $labels.instance }} is using more than 90% of available memory.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
-    expr: vm_app_memory_usage_bytes{job="vmselect"} / vm_app_memory_limit_bytes{job="vmselect"} > 0.9
+    expr: go_memstats_alloc_bytes{job="vmselect"} > 200000000
     for: 5m
     labels:
       severity: warning
@@ -76,7 +76,7 @@ groups:
     annotations:
       summary: "VMStorage disk space is running low"
       description: "VMStorage instance {{ $labels.instance }} has less than 15% free disk space.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
-    expr: vm_free_disk_space_bytes{job="vmstorage"} / vm_data_size_bytes{job="vmstorage"} < 0.15
+    expr: vm_free_disk_space_bytes{job="vmstorage"} / (sum(vm_data_size_bytes{job="vmstorage"}) by (instance) + vm_free_disk_space_bytes{job="vmstorage"}) < 0.15
     for: 10m
     labels:
       severity: warning
@@ -86,7 +86,7 @@ groups:
     annotations:
       summary: "VMStorage disk space is critically low"
       description: "VMStorage instance {{ $labels.instance }} has less than 5% free disk space.\nVALUE = {{ $value }}\nLABELS = {{ $labels }}"
-    expr: vm_free_disk_space_bytes{job="vmstorage"} / vm_data_size_bytes{job="vmstorage"} < 0.05
+    expr: vm_free_disk_space_bytes{job="vmstorage"} / (sum(vm_data_size_bytes{job="vmstorage"}) by (instance) + vm_free_disk_space_bytes{job="vmstorage"}) < 0.05
     for: 5m
     labels:
       severity: critical

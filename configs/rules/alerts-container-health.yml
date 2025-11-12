@@ -8,7 +8,7 @@ groups:
       description: "Node memory is filling up (< 10% left)\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
     labels:
       severity: warning
-    expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100 < 10) * on(instance) group_left (nodename) node_uname_info{nodename=~".+"}
+    expr: (node_memory_MemAvailable_bytes{job="node-exporter"} / node_memory_MemTotal_bytes{job="node-exporter"} * 100 < 10) * on(instance) group_left (nodename) node_uname_info{job="node-exporter",nodename=~".+"}
     for: 2m
 
   - alert: NodeMemoryUnderMemoryPressure
@@ -17,7 +17,7 @@ groups:
       description: "The node is under heavy memory pressure. High rate of major page faults\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
     labels:
       severity: warning
-    expr: (rate(node_vmstat_pgmajfault[1m]) > 1000) * on(instance) group_left (nodename) node_uname_info{nodename=~".+"}
+    expr: (rate(node_vmstat_pgmajfault{job="node-exporter"}[1m]) > 1000) * on(instance) group_left (nodename) node_uname_info{job="node-exporter",nodename=~".+"}
     for: 2m
 
   - alert: NodeFilesystemAlmostOutOfSpace
@@ -26,9 +26,9 @@ groups:
       summary: "Filesystem has less than 5% space left."
     expr: |
       (
-        node_filesystem_avail_bytes{job="node",fstype!=""} / node_filesystem_size_bytes{job="node",fstype!=""} * 100 < 5
+        node_filesystem_avail_bytes{job="node-exporter",fstype!=""} / node_filesystem_size_bytes{job="node-exporter",fstype!=""} * 100 < 5
       and
-        node_filesystem_readonly{job="node",fstype!=""} == 0
+        node_filesystem_readonly{job="node-exporter",fstype!=""} == 0
       )
     for: 1h
     labels:
@@ -40,9 +40,9 @@ groups:
       summary: "Filesystem has less than 3% space left."
     expr: |
       (
-        node_filesystem_avail_bytes{job="node",fstype!=""} / node_filesystem_size_bytes{job="node",fstype!=""} * 100 < 3
+        node_filesystem_avail_bytes{job="node-exporter",fstype!=""} / node_filesystem_size_bytes{job="node-exporter",fstype!=""} * 100 < 3
       and
-        node_filesystem_readonly{job="node",fstype!=""} == 0
+        node_filesystem_readonly{job="node-exporter",fstype!=""} == 0
       )
     for: 1h
     labels:

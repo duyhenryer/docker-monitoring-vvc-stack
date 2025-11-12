@@ -704,9 +704,8 @@ services:
       - ./configs/rules/alerts-vmalert.yml:/etc/alerts/alerts-vmalert.yml:ro
       - ./configs/rules/alerts-vmauth.yml:/etc/alerts/alerts-vmauth.yml:ro
       - ./configs/rules/alerts-vlogs.yml:/etc/alerts/alerts-vlogs.yml:ro
-      - ./configs/rules/vlogs-example-alerts.yml:/etc/alerts/vlogs-example-alerts.yml:ro
     command:
-      - "--datasource.url=http://vmauth:8427/select/0/prometheus"
+      - "--datasource.url=http://vmauth:8427/"
       - "--datasource.basicAuth.username=${VMAUTH_USERNAME:-admin}"
       - "--datasource.basicAuth.password=${VMAUTH_PASSWORD:-changeme}"
       # alerts state is restored from VictoriaMetrics on restarts
