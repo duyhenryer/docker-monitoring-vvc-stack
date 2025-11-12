@@ -4,31 +4,89 @@
 # IMPORTANT: Change username and password to match VMAUTH_USERNAME and VMAUTH_PASSWORD in .env file
 # Default: admin/changeme
 # Also update the Grafana datasource configuration if you change these credentials.
-users:
-  - username: "admin"
-    password: "changeme"
-    url_map:
-    # VictoriaMetrics Cluster
+
+# ./configs/vm/auth-vm-cluster.yml
+
+# --- UNAUTHENTICATED CONTEXT (GUEST/READ-ONLY) ---
+# All requests without basic auth will be handled by these rules.
+# We will only allow READ access to ensure the system remains safe.
+unauthorized_user:
+  url_map:
+    # Allow reading metrics from VictoriaMetrics Cluster
+    # These are endpoints Grafana uses to query
     - src_paths:
-      - "/select/0/prometheus/.*"
-      - "/admin/.*"
+      - "/api/v1/query"
+      - "/api/v1/query_range"
+      - "/api/v1/series"
+      - "/api/v1/labels"
+      - "/api/v1/label/.*/values"
       url_prefix:
-      - http://vmselect-1:8481
-      - http://vmselect-2:8481
-    - src_paths:
-      - "/insert/0/prometheus/.*"
-      url_prefix:
-      - http://vminsert-1:8480
-      - http://vminsert-2:8480
-    # VictoriaLogs Cluster
+      - http://vmselect-1:8481/select/0/prometheus
+      - http://vmselect-2:8481/select/0/prometheus
+
+    # Allow reading logs from VictoriaLogs Cluster
     - src_paths:
       - "/select/logsql/.*"
       - "/select/vmui/.*"
       url_prefix:
       - http://vlselect-1:9471
       - http://vlselect-2:9471
-    - src_paths:
-      - "/insert/jsonline/.*"
-      - "/insert/elasticsearch/.*"
-      url_prefix:
-      - http://vlinsert:9481
+    
+    # Note: We DO NOT include /insert/.* here.
+    # This prevents anonymous users from writing logs/metrics.
+
+# --- AUTHENTICATED CONTEXT (ADMIN/FULL-ACCESS) ---
+# Requests authenticated with basic auth "admin:changeme" will be handled here.
+users:
+  - username: "admin"
+    password: "changeme"
+    url_map:
+      # --- Routing for VictoriaMetrics Cluster ---
+      # SELECT (read)
+      - src_paths:
+        - "/api/v1/query"
+        - "/api/v1/query_range"
+        - "/api/v1/series"
+        - "/api/v1/labels"
+        - "/api/v1/label/.*/values"
+        url_prefix:
+        - http://vmselect-1:8481/select/0/prometheus
+        - http://vmselect-2:8481/select/0/prometheus
+      
+      # Internal paths
+      - src_paths:
+        - "/select/0/prometheus/.*"
+        - "/admin/.*"
+        url_prefix:
+        - http://vmselect-1:8481
+        - http://vmselect-2:8481
+      
+      # INSERT (write)
+      - src_paths:
+        - "/api/v1/write"
+        - "/api/v1/import.*"
+        url_prefix:
+        - http://vminsert-1:8480/insert/0/prometheus
+        - http://vminsert-2:8480/insert/0/prometheus
+      
+      - src_paths:
+        - "/insert/0/prometheus/.*"
+        url_prefix:
+        - http://vminsert-1:8480
+        - http://vminsert-2:8480
+      
+      # --- Routing for VictoriaLogs Cluster ---
+      # SELECT (read)
+      - src_paths:
+        - "/select/logsql/.*"
+        - "/select/vmui/.*"
+        url_prefix:
+        - http://vlselect-1:9471
+        - http://vlselect-2:9471
+      
+      # INSERT (write logs)
+      - src_paths:
+        - "/insert/jsonline/.*"
+        - "/insert/elasticsearch/.*"
+        url_prefix:
+        - http://vlinsert:9481
