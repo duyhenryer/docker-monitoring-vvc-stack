@@ -1,92 +1,270 @@
-# balance load among vminsert, vmselect, vlinsert, vlselect instances
-# see https://docs.victoriametrics.com/victoriametrics/vmauth/#load-balancing.
+# ============================================================================
+# vmauth Configuration: VictoriaMetrics Cluster + VictoriaLogs Cluster
+# ============================================================================
 # 
-# IMPORTANT: Change username and password to match VMAUTH_USERNAME and VMAUTH_PASSWORD in .env file
-# Default: admin/changeme
-# Also update the Grafana datasource configuration if you change these credentials.
-
-# ./configs/vm/auth-vm-cluster.yml
+# This configuration combines BOTH VictoriaMetrics Cluster and VictoriaLogs 
+# Cluster in a single vmauth setup. It provides load balancing, authentication,
+# and intelligent routing between the two clusters.
+#
+# Official Examples (for reference):
+# - VM Cluster only: https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/auth-vm-cluster.yml
+# - VL Cluster only: https://github.com/VictoriaMetrics/VictoriaLogs/blob/master/deployment/docker/auth-vl-cluster.yml
+# - Full docs: https://docs.victoriametrics.com/victoriametrics/vmauth/
+# - Load balancing: https://docs.victoriametrics.com/victoriametrics/vmauth/#load-balancing
+#
+# IMPORTANT: 
+# - Change username and password to match VMAUTH_USERNAME and VMAUTH_PASSWORD in .env file
+# - Default: admin/changeme
+# - Also update Grafana datasource configuration if you change these credentials
+#
+# ============================================================================
+# HOW ROUTING WORKS:
+# ============================================================================
+# 1. vmauth matches incoming request path against src_paths (regex patterns)
+# 2. If match found, request is forwarded to url_prefix backend(s)
+# 3. Path is forwarded AS-IS unless drop_src_path_prefix_parts is used
+# 4. For VM Cluster: paths need /select/0/prometheus or /insert/0/prometheus prefix
+# 5. For VL Cluster: paths are simpler, no tenant prefix needed
+# 6. Multiple backends in url_prefix = load balancing (least-loaded round-robin)
+# 7. retry_status_codes: automatically retry on other backends if current returns these codes
+#
+# ============================================================================
 
 # --- UNAUTHENTICATED CONTEXT (GUEST/READ-ONLY) ---
-# All requests without basic auth will be handled by these rules.
-# We will only allow READ access to ensure the system remains safe.
+# All requests WITHOUT basic auth will be handled by these rules.
+# We only allow READ operations to ensure system security.
+# No INSERT operations are allowed for anonymous users.
 unauthorized_user:
   url_map:
-    # Allow reading metrics from VictoriaMetrics Cluster
-    # These are endpoints Grafana uses to query
+    # ========================================================================
+    # VictoriaMetrics Cluster - Prometheus API (Read Only)
+    # ========================================================================
+    # Purpose: Allow Grafana and other tools to query metrics via Prometheus API
+    # 
+    # How it works:
+    # - Grafana calls: /api/v1/query
+    # - vmauth matches: /api/v1/.*
+    # - Forwards to: http://vmselect-1:8481/select/0/prometheus/api/v1/query
+    # - Note: url_prefix includes /select/0/prometheus because VM cluster needs this prefix
+    #
+    # Source: Based on official VM cluster example, but adapted for Prometheus API
+    # Reference: https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/auth-vm-cluster.yml
+    #
     - src_paths:
-      - "/api/v1/query"
-      - "/api/v1/query_range"
-      - "/api/v1/series"
-      - "/api/v1/labels"
-      - "/api/v1/label/.*/values"
+        - "/api/v1/.*"
       url_prefix:
-      - http://vmselect-1:8481/select/0/prometheus
-      - http://vmselect-2:8481/select/0/prometheus
+        - http://vmselect-1:8481/select/0/prometheus
+        - http://vmselect-2:8481/select/0/prometheus
+      retry_status_codes: [500, 502, 503]
+      # Explanation: If one vmselect returns 500/502/503, automatically retry on the other
 
-    # Allow reading logs from VictoriaLogs Cluster
+    # ========================================================================
+    # VictoriaLogs Cluster - LogsQL and VMUI (Read Only)
+    # ========================================================================
+    # Purpose: Allow reading logs via LogsQL queries and VMUI interface
+    #
+    # How it works:
+    # - LogsQL queries: /select/logsql/query?q=...
+    # - VMUI interface: /select/vmui/...
+    # - vmauth matches: /select/logsql/.* or /select/vmui/.*
+    # - Forwards to: http://vlselect-1:9471/select/logsql/... (path kept as-is)
+    #
+    # Source: Based on official VL cluster example
+    # Reference: https://github.com/VictoriaMetrics/VictoriaLogs/blob/master/deployment/docker/auth-vl-cluster.yml
+    #
     - src_paths:
-      - "/select/logsql/.*"
-      - "/select/vmui/.*"
+        - "/select/logsql/.*"
+        - "/select/vmui/.*"
       url_prefix:
-      - http://vlselect-1:9471
-      - http://vlselect-2:9471
-    
-    # Note: We DO NOT include /insert/.* here.
-    # This prevents anonymous users from writing logs/metrics.
+        - http://vlselect-1:9471
+        - http://vlselect-2:9471
+      retry_status_codes: [422, 500, 502, 503, 504]
+      # Explanation: Load balancing between 2 vlselect instances with automatic retry
+      # 422: Unprocessable Entity (storage node connection issues)
+      # 500/502/503: Server errors
+      # 504: Gateway Timeout (storage node timeout)
+
+    # ========================================================================
+    # Security Note: No INSERT Operations for Unauthorized Users
+    # ========================================================================
+    # We DO NOT include /insert/.* here to prevent anonymous users from 
+    # writing metrics or logs. Only authenticated users (below) can write data.
 
 # --- AUTHENTICATED CONTEXT (ADMIN/FULL-ACCESS) ---
-# Requests authenticated with basic auth "admin:changeme" will be handled here.
+# Requests WITH basic auth "admin:changeme" will be handled here.
+# Full access: both READ and WRITE operations are allowed.
 users:
   - username: "admin"
     password: "changeme"
+    
+    # ========================================================================
+    # Concurrency Limit
+    # ========================================================================
+    # Limit: Maximum 200 concurrent requests from this user
+    # Purpose: Prevent overload of backend services
+    # Behavior: If limit reached, vmauth returns 429 Too Many Requests
+    # Reference: https://docs.victoriametrics.com/victoriametrics/vmauth/#concurrency-limiting
+    max_concurrent_requests: 200
+    
     url_map:
-      # --- Routing for VictoriaMetrics Cluster ---
-      # SELECT (read)
+      # ====================================================================
+      # VictoriaMetrics Cluster - Prometheus API (Read)
+      # ====================================================================
+      # Purpose: Prometheus-compatible API for querying metrics
+      # Used by: Grafana, PromQL queries, API clients
+      #
+      # How it works:
+      # - Request: GET /api/v1/query?query=up
+      # - vmauth matches: /api/v1/.*
+      # - Forwards to: http://vmselect-1:8481/select/0/prometheus/api/v1/query?query=up
+      # - Note: url_prefix includes /select/0/prometheus prefix for VM cluster
+      #
+      # Source: Based on official VM cluster example
+      # Reference: https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/auth-vm-cluster.yml
+      #
       - src_paths:
-        - "/api/v1/query"
-        - "/api/v1/query_range"
-        - "/api/v1/series"
-        - "/api/v1/labels"
-        - "/api/v1/label/.*/values"
+          - "/api/v1/.*"
         url_prefix:
-        - http://vmselect-1:8481/select/0/prometheus
-        - http://vmselect-2:8481/select/0/prometheus
-      
-      # Internal paths
+          - http://vmselect-1:8481/select/0/prometheus
+          - http://vmselect-2:8481/select/0/prometheus
+        retry_status_codes: [500, 502, 503]
+        # Explanation: Automatic failover if one vmselect is down or returns error
+
+      # ====================================================================
+      # VictoriaMetrics Cluster - Internal Select Paths (Read)
+      # ====================================================================
+      # Purpose: Direct access to VM select endpoints (already have /select/0/prometheus in path)
+      # Used by: Internal tools, direct API calls
+      #
+      # How it works:
+      # - Request: GET /select/0/prometheus/api/v1/query
+      # - vmauth matches: /select/0/prometheus/.*
+      # - Forwards to: http://vmselect-1:8481/select/0/prometheus/api/v1/query (path kept as-is)
+      # - Note: url_prefix is base URL only, path is forwarded unchanged
+      #
+      # Also handles: /admin/.* for admin operations
+      #
+      # Source: Official VM cluster example
+      # Reference: https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/auth-vm-cluster.yml
+      #
       - src_paths:
-        - "/select/0/prometheus/.*"
-        - "/admin/.*"
+          - "/select/0/prometheus/.*"
+          - "/admin/.*"
         url_prefix:
-        - http://vmselect-1:8481
-        - http://vmselect-2:8481
-      
-      # INSERT (write)
+          - http://vmselect-1:8481
+          - http://vmselect-2:8481
+        retry_status_codes: [500, 502, 503]
+        # Explanation: Load balancing with automatic retry on errors
+
+      # ====================================================================
+      # VictoriaMetrics Cluster - Insert (Write)
+      # ====================================================================
+      # Purpose: Write metrics to VM cluster
+      # Used by: vmagent, vmalert, other metric collectors
+      #
+      # How it works:
+      # - Request: POST /insert/0/prometheus/api/v1/write
+      # - vmauth matches: /insert/0/prometheus/.*
+      # - Forwards to: http://vminsert-1:8480/insert/0/prometheus/api/v1/write (path kept as-is)
+      # - Note: We use specific path /insert/0/prometheus/.* to avoid conflict with VL insert
+      #
+      # Important: This is DIFFERENT from VL insert paths below!
+      # - VM insert: /insert/0/prometheus/.*
+      # - VL insert: /insert/jsonline/.* or /insert/elasticsearch/.*
+      #
+      # Source: Official VM cluster example
+      # Reference: https://github.com/VictoriaMetrics/VictoriaMetrics/blob/master/deployment/docker/auth-vm-cluster.yml
+      #
       - src_paths:
-        - "/api/v1/write"
-        - "/api/v1/import.*"
+          - "/insert/0/prometheus/.*"
         url_prefix:
-        - http://vminsert-1:8480/insert/0/prometheus
-        - http://vminsert-2:8480/insert/0/prometheus
-      
+          - http://vminsert-1:8480
+          - http://vminsert-2:8480
+        retry_status_codes: [500, 502, 503]
+        # Explanation: Load balancing between 2 vminsert instances with automatic retry
+
+      # ====================================================================
+      # VictoriaLogs Cluster - LogsQL and VMUI (Read)
+      # ====================================================================
+      # Purpose: Query logs via LogsQL and access VMUI interface
+      # Used by: Grafana (VictoriaLogs datasource), LogsQL CLI, VMUI
+      #
+      # How it works:
+      # - LogsQL: GET /select/logsql/query?q=...
+      # - VMUI: GET /select/vmui/...
+      # - vmauth matches: /select/logsql/.* or /select/vmui/.*
+      # - Forwards to: http://vlselect-1:9471/select/logsql/... (path kept as-is)
+      #
+      # Note: VL paths are simpler than VM - no tenant prefix needed
+      #
+      # Source: Official VL cluster example
+      # Reference: https://github.com/VictoriaMetrics/VictoriaLogs/blob/master/deployment/docker/auth-vl-cluster.yml
+      #
       - src_paths:
-        - "/insert/0/prometheus/.*"
+          - "/select/logsql/.*"
+          - "/select/vmui/.*"
         url_prefix:
-        - http://vminsert-1:8480
-        - http://vminsert-2:8480
-      
-      # --- Routing for VictoriaLogs Cluster ---
-      # SELECT (read)
+          - http://vlselect-1:9471
+          - http://vlselect-2:9471
+        retry_status_codes: [422, 500, 502, 503, 504]
+        # Explanation: Load balancing between 2 vlselect instances with automatic retry
+        # 422: Unprocessable Entity (storage node connection issues)
+        # 500/502/503: Server errors
+        # 504: Gateway Timeout (storage node timeout)
+
+      # ====================================================================
+      # VictoriaLogs Cluster - Insert (Write)
+      # ====================================================================
+      # Purpose: Write logs to VL cluster
+      # Used by: Vector, Fluentd, Logstash, other log collectors
+      #
+      # How it works:
+      # - JSON Lines: POST /insert/jsonline/...
+      # - Elasticsearch: POST /insert/elasticsearch/...
+      # - vmauth matches: /insert/jsonline/.* or /insert/elasticsearch/.*
+      # - Forwards to: http://vlinsert:9481/insert/jsonline/... (path kept as-is)
+      #
+      # Important: This is DIFFERENT from VM insert paths above!
+      # - VM insert: /insert/0/prometheus/.*
+      # - VL insert: /insert/jsonline/.* or /insert/elasticsearch/.*
+      #
+      # Note: We only have 1 vlinsert instance (not load balanced)
+      # If you add more vlinsert instances, add them to url_prefix list
+      #
+      # Source: Official VL cluster example
+      # Reference: https://github.com/VictoriaMetrics/VictoriaLogs/blob/master/deployment/docker/auth-vl-cluster.yml
+      #
       - src_paths:
-        - "/select/logsql/.*"
-        - "/select/vmui/.*"
+          - "/insert/jsonline/.*"
+          - "/insert/elasticsearch/.*"
         url_prefix:
-        - http://vlselect-1:9471
-        - http://vlselect-2:9471
-      
-      # INSERT (write logs)
-      - src_paths:
-        - "/insert/jsonline/.*"
-        - "/insert/elasticsearch/.*"
-        url_prefix:
-        - http://vlinsert:9481
+          - http://vlinsert:9481
+        retry_status_codes: [500, 502, 503]
+        # Explanation: Automatic retry if vlinsert returns error (useful when scaling to multiple instances)
+
+# ============================================================================
+# KEY DIFFERENCES: VM vs VL Routing
+# ============================================================================
+# 
+# VictoriaMetrics Cluster:
+# - Needs tenant prefix: /select/0/prometheus or /insert/0/prometheus
+# - Prometheus API: /api/v1/.* → needs /select/0/prometheus prefix in url_prefix
+# - Internal paths: Already have /select/0/prometheus → use base URL only
+# - Insert paths: /insert/0/prometheus/.* → use base URL only
+#
+# VictoriaLogs Cluster:
+# - No tenant prefix needed
+# - Select paths: /select/logsql/.*, /select/vmui/.* → use base URL only
+# - Insert paths: /insert/jsonline/.*, /insert/elasticsearch/.* → use base URL only
+#
+# ============================================================================
+# LOAD BALANCING BEHAVIOR
+# ============================================================================
+# 
+# When multiple backends are listed in url_prefix:
+# - Default policy: least-loaded round-robin
+# - Automatically skips unavailable backends
+# - retry_status_codes: Retries on other backends if current returns 500/502/503
+# - This provides high availability and automatic failover
+#
+# Example: If vmselect-1 returns 500, request is automatically retried on vmselect-2
