@@ -2,17 +2,17 @@ x-logging:
   &default-logging
   driver: "json-file"
   options:
-    max-size: "1m"
-    max-file: "1"
+    max-size: "10m"
+    max-file: "5"
     tag: "{{.Name}}"
 
 x-common-labels: &default-labels
   logging_jobname: "containerlogs"
-  stackname: "docker-monitoring-stack"
+  stackname: "docker-monitoring-vvc-stack"
 
 services:
   grafana:
-    image: grafana/grafana:${GRAFANA_VERSION:-latest}
+    image: grafana/grafana:${GRAFANA_VERSION:-12.2.0} # fix version to avoid breaking changes
     container_name: grafana
     restart: unless-stopped
     environment:
@@ -36,8 +36,9 @@ services:
       - ./dashboards/vmalert.json:/var/lib/grafana/dashboards/vmalert.json:ro
       - ./dashboards/vm-cluster.json:/var/lib/grafana/dashboards/vm-cluster.json:ro
       # for victorialogs cluster
-      - ./dashboards/victorialogs_rev6.json:/var/lib/grafana/dashboards/victorialogs_rev6.json:ro
+      # - ./dashboards/victorialogs_rev6.json:/var/lib/grafana/dashboards/victorialogs_rev6.json:ro
       - ./dashboards/victorialogs-cluster.json:/var/lib/grafana/dashboards/victorialogs-cluster.json:ro
+      - ./dashboards/victorialogs-docker.json:/var/lib/grafana/dashboards/victorialogs-docker.json:ro
       # vector dashboard
       - ./dashboards/vector_21954.json:/var/lib/grafana/dashboards/vector_21954.json:ro
       - grafana-data:/var/lib/grafana
